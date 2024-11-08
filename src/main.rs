@@ -64,12 +64,10 @@ fn main() -> Status {
 
             if measure_count == 0 {
                 println!("We are done!");
-                match set_variable(var_name, &vendor, attributes, &[]) {
-                    Ok(()) => {},
-                    Err(err) => {
-                        println!("Error setting variable: {}", err);
-                        return err.status()
-                    }
+
+                if let Err(err) = set_variable(var_name, &vendor, attributes, &[]) {
+                    println!("Error setting variable: {}", err);
+                    return err.status();
                 }
 
                 return Status::SUCCESS
@@ -83,32 +81,23 @@ fn main() -> Status {
 
             // FIRST TIME
 
-            match write_file(FILENAME_STATS, &[]) {
-                Ok(()) => (),
-                Err(err) => {
-                    println!("Error writing file: {}", err);
-                    return Status::NOT_FOUND;
-                }
-            };
+            if let Err(err) = write_file(FILENAME_STATS, &[]) {
+                println!("Error writing file: {}", err);
+                return Status::NOT_FOUND;
+            }
 
-            match set_variable(var_name, &vendor, attributes, &buffer) {
-                Ok(()) => {},
-                Err(err) => {
-                    println!("Error setting variable: {}", err);
-                    return err.status()
-                }
+            if let Err(err) = set_variable(var_name, &vendor, attributes, &buffer) {
+                println!("Error setting variable: {}", err);
+                return err.status();
             }
         }
     }
 
     measure_count -= 1;
     buffer[0] = measure_count;
-    match set_variable(var_name, &vendor, attributes, &buffer) {
-        Ok(()) => {},
-        Err(err) => {
-            println!("Error setting variable: {}", err);
-            return err.status()
-        }
+    if let Err(err) = set_variable(var_name, &vendor, attributes, &buffer) {
+        println!("Error setting variable: {}", err);
+        return err.status();
     }
 
     let content = match read_file(FILENAME_STATS) {
@@ -127,13 +116,10 @@ fn main() -> Status {
     // println!("Writing to file: {text}");
 
     let txt_bytes = text.as_bytes();
-    match write_file(FILENAME_STATS, txt_bytes) {
-        Ok(()) => (),
-        Err(err) => {
-            println!("Error writing file: {}", err);
-            return Status::NOT_FOUND;
-        }
-    };
+    if let Err(err) = write_file(FILENAME_STATS, txt_bytes) {
+        println!("Error writing file: {}", err);
+        return Status::NOT_FOUND;
+    }
 
     reset(ResetType::COLD, Status::SUCCESS, None);
     // Status::SUCCESS
