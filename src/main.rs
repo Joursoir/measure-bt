@@ -8,13 +8,16 @@ use alloc::format;
 use uefi::prelude::*;
 use uefi::runtime::*;
 use uefi::runtime::{VariableVendor};
-use uefi::{Guid, CStr16};
+use uefi::{guid, CStr16};
 use uefi::println;
 
 use uefi::CString16;
 use uefi::fs::{FileSystem, FileSystemResult};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::boot::{self, ScopedProtocol};
+
+// To access measure data variables
+const MEASURE_VARIABLES: VariableVendor = VariableVendor(guid!("12345678-1234-1234-1234-123456789012"));
 
 const FILENAME_STATS: &str = "measure_count.txt";
 const AMOUNT_OF_RESTARTS: u8 = 100;
@@ -45,11 +48,10 @@ fn main() -> Status {
     let mut var_name_str = [0u16; 16];
     let var_name = CStr16::from_str_with_buf("MeasureCount", &mut var_name_str).unwrap();
 
-    let vendor = VariableVendor(Guid::from_bytes([12, 34, 56, 78, 12, 34, 12, 34, 12, 34, 12, 34, 56, 78, 90, 12]));
     let attributes = VariableAttributes::NON_VOLATILE | VariableAttributes::BOOTSERVICE_ACCESS;
     let mut measure_count = AMOUNT_OF_RESTARTS;
 
-    match uefi::runtime::get_variable(var_name, &vendor, &mut buffer) {
+    match uefi::runtime::get_variable(var_name, &MEASURE_VARIABLES, &mut buffer) {
         Ok((variable, attrs)) => {
             println!("{}\n  {:?}\n  Content: {:?}", var_name, attrs, variable);
 
@@ -65,7 +67,7 @@ fn main() -> Status {
             if measure_count == 0 {
                 println!("We are done!");
 
-                if let Err(err) = set_variable(var_name, &vendor, attributes, &[]) {
+                if let Err(err) = set_variable(var_name, &MEASURE_VARIABLES, attributes, &[]) {
                     println!("Error setting variable: {}", err);
                     return err.status();
                 }
@@ -86,7 +88,7 @@ fn main() -> Status {
                 return Status::NOT_FOUND;
             }
 
-            if let Err(err) = set_variable(var_name, &vendor, attributes, &buffer) {
+            if let Err(err) = set_variable(var_name, &MEASURE_VARIABLES, attributes, &buffer) {
                 println!("Error setting variable: {}", err);
                 return err.status();
             }
@@ -95,7 +97,7 @@ fn main() -> Status {
 
     measure_count -= 1;
     buffer[0] = measure_count;
-    if let Err(err) = set_variable(var_name, &vendor, attributes, &buffer) {
+    if let Err(err) = set_variable(var_name, &MEASURE_VARIABLES, attributes, &buffer) {
         println!("Error setting variable: {}", err);
         return err.status();
     }
