@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use alloc::format;
 use uefi::prelude::*;
 use uefi::runtime::*;
@@ -12,8 +11,8 @@ use uefi::{guid, CStr16};
 use uefi::println;
 
 use uefi::CString16;
-use uefi::fs::{FileSystem, FileSystemResult};
 use uefi::proto::media::fs::SimpleFileSystem;
+use uefi::proto::media::file::*;
 use uefi::boot::{self, ScopedProtocol};
 
 // To access measure data variables
@@ -22,18 +21,58 @@ const MEASURE_VARIABLES: VariableVendor = VariableVendor(guid!("12345678-1234-12
 const FILENAME_STATS: &str = "measure_count.txt";
 const AMOUNT_OF_RESTARTS: u8 = 100;
 
-fn read_file(path: &str) -> FileSystemResult<String> {
-    let path: CString16 = CString16::try_from(path).unwrap();
-    let fs: ScopedProtocol<SimpleFileSystem> = boot::get_image_file_system(boot::image_handle()).unwrap();
-    let mut fs = FileSystem::new(fs);
-    fs.read_to_string(path.as_ref())
+fn open_file(
+    simple_fs: &mut ScopedProtocol<SimpleFileSystem>,
+    filename: &str,
+) -> Result<RegularFile, Status> {
+    let mut root_dir: Directory = simple_fs.open_volume().map_err(|err| {
+        println!("Failed to open the root directory on a volume: {}", err);
+        err.status()
+    })?;
+
+    let path = CString16::try_from(filename).map_err(|_| {
+        println!("Failed to create CString16 from filename.");
+        Status::INVALID_PARAMETER
+    })?;
+
+    let file_mode = FileMode::CreateReadWrite;
+    let file_attr = FileAttribute::empty();
+
+    let file_handle = root_dir.open(path.as_ref(), file_mode, file_attr).map_err(|err| {
+        println!("Failed to open a file relative to the root directory: {}", err);
+        err.status()
+    })?;
+
+    file_handle.into_regular_file().ok_or_else(|| {
+        println!("Specified file is not actually a regular file");
+        Status::NOT_FOUND
+    })
 }
 
-fn write_file(path: &str, buffer: &[u8]) -> FileSystemResult<()> {
-    let path: CString16 = CString16::try_from(path).unwrap();
-    let fs: ScopedProtocol<SimpleFileSystem> = boot::get_image_file_system(boot::image_handle()).unwrap();
-    let mut fs = FileSystem::new(fs);
-    fs.write(path.as_ref(), buffer)
+fn write_timestamped_entry(
+    file: &mut RegularFile,
+    count: u8
+) -> Result<(), Status> {
+    file.set_position(RegularFile::END_OF_FILE).map_err(|err| {
+        println!("Failed seeking past the end of the file: {}", err);
+        err.status()
+    })?;
+
+    let time = uefi::runtime::get_time().map_err(|err| {
+        println!("Failed to get current time: {}", err);
+        err.status()
+    })?;
+
+    // Calculate seconds since midnight
+    let seconds: u64 = (time.hour() as u64) * 3600 + (time.minute() as u64) * 60 + (time.second() as u64);
+    let text = format!("{count}: {seconds} seconds\n");
+    let txt_bytes = text.as_bytes();
+
+    // TODO: check a number of bytes that were actually written
+    file.write(txt_bytes).map_err(|err| {
+        println!("Failed to write to the file: {}", err);
+        err.status()
+    })
 }
 
 // fn get_count() -> Result {
@@ -83,11 +122,6 @@ fn main() -> Status {
 
             // FIRST TIME
 
-            if let Err(err) = write_file(FILENAME_STATS, &[]) {
-                println!("Error writing file: {}", err);
-                return Status::NOT_FOUND;
-            }
-
             if let Err(err) = set_variable(var_name, &MEASURE_VARIABLES, attributes, &buffer) {
                 println!("Error setting variable: {}", err);
                 return err.status();
@@ -102,25 +136,21 @@ fn main() -> Status {
         return err.status();
     }
 
-    let content = match read_file(FILENAME_STATS) {
-        Ok(text) => text,
+    let mut simple_fs: ScopedProtocol<SimpleFileSystem> = match boot::get_image_file_system(boot::image_handle()) {
+        Ok(fs) => fs,
         Err(err) => {
-            println!("Error reading file: {}", err);
-            return Status::NOT_FOUND;
+            println!("Failed to get image file system: {}", err);
+            return err.status();
         }
     };
 
-    let time = uefi::runtime::get_time().unwrap();
-    let sec: u64 = (time.hour() as u64) * 3600 + (time.minute() as u64) * 60 + (time.second() as u64);
-    let text = format!("{content}{}: {} seconds\n", buffer[0], sec);
+    let mut file = match open_file(&mut simple_fs, FILENAME_STATS) {
+        Ok(f) => f,
+        Err(status) => return status,
+    };
 
-    // println!("Readed from file: {content}");
-    // println!("Writing to file: {text}");
-
-    let txt_bytes = text.as_bytes();
-    if let Err(err) = write_file(FILENAME_STATS, txt_bytes) {
-        println!("Error writing file: {}", err);
-        return Status::NOT_FOUND;
+    if let Err(status) = write_timestamped_entry(&mut file, measure_count) {
+        return status;
     }
 
     reset(ResetType::COLD, Status::SUCCESS, None);
