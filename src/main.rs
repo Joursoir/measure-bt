@@ -153,6 +153,8 @@ fn main() -> Status {
         return status;
     }
 
+    file.close();
+
     reset(ResetType::COLD, Status::SUCCESS, None);
     // Status::SUCCESS
 }
